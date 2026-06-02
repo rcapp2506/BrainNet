@@ -20,6 +20,11 @@ class DataConfig:
     label_col: str = "LABEL"
     positive_label: str = "P"                # P -> 1 ; tutto il resto -> 0
 
+    # ── Test cieco (golden set indipendente: carbidopa-test.csv) ──
+    # Coorte separata, valutata UNA SOLA VOLTA a fine lavoro.
+    test_labels_csv: str = "labels_test.csv"
+    test_dicom_subdir: str = "CDOPA-TEST"
+
     # Region of interest peri-striatale (esplicita e documentata; nel notebook
     # originale erano xmin/xmax/ymin/ymax + irange* sovrascritti a runtime).
     slice_start: int = 20

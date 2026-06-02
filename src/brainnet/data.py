@@ -173,3 +173,10 @@ def make_datasets(df_train: pd.DataFrame, df_val: pd.DataFrame, cfg: Config):
     va = df_val[["guid_dir", "label"]].to_dict("records")
     return (_VolumeDataset(tr, build_transforms(cfg.data, train=True)),
             _VolumeDataset(va, build_transforms(cfg.data, train=False)))
+
+
+def make_eval_dataset(df: pd.DataFrame, cfg: Config):
+    """Dataset di sola valutazione: trasformazioni deterministiche (train=False),
+    nessuna augmentation. Usato per il test cieco e, in generale, per inferenza."""
+    items = df[["guid_dir", "label"]].to_dict("records")
+    return _VolumeDataset(items, build_transforms(cfg.data, train=False))

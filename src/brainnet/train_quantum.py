@@ -135,6 +135,7 @@ def train_quantum_cv(cfg: Config, n_seeds: int = 5, max_epochs: int = 15,
         dl_va = DataLoader(ds_va, batch_size=batch_size, shuffle=False,
                            num_workers=cfg.train.num_workers)
 
+        best_fold_auc = -1.0   # per salvare l'ibrido migliore del fold (test cieco)
         for s in range(n_seeds):
             seed = cfg.train.seed + 111 * s
             # Ibrido (quantistico): backend con seed -> init pesi riproducibile
@@ -144,6 +145,11 @@ def train_quantum_cv(cfg: Config, n_seeds: int = 5, max_epochs: int = 15,
             h = _train_one(hybrid, dl_tr, dl_va, device, max_epochs,
                            cfg.train.lr, cfg.train.weight_decay,
                            cfg.train.early_stop_patience)
+            # checkpoint dell'ibrido migliore del fold -> ensemble per il test cieco
+            if h["final_auc"] is not None and h["final_auc"] > best_fold_auc:
+                best_fold_auc = h["final_auc"]
+                torch.save({k: v.cpu() for k, v in hybrid.state_dict().items()},
+                           out_dir / f"qfold{fold}_best.pt")
 
             # Controllo classico appaiato: stesso fold, stesso seed, stesso input
             set_seed(seed)
