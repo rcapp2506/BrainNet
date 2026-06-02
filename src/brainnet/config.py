@@ -20,14 +20,31 @@ class DataConfig:
     label_col: str = "LABEL"
     positive_label: str = "P"                # P -> 1 ; tutto il resto -> 0
 
-    # Region of interest: nel notebook erano xmin/xmax/ymin/ymax + irange*
-    # Centro striatale: 10 slice, crop 130x130. Reso esplicito e documentato.
+    # Region of interest peri-striatale (esplicita e documentata; nel notebook
+    # originale erano xmin/xmax/ymin/ymax + irange* sovrascritti a runtime).
     slice_start: int = 20
     slice_end: int = 30                      # exclusive -> 10 slice
     crop_x: tuple[int, int] = (33, 163)      # 130 px
     crop_y: tuple[int, int] = (73, 203)      # 130 px
 
-    spatial_size: tuple[int, int, int] = (130, 130, 10)  # H, W, D
+    # ── Layout di output ──
+    # False -> volume 3D (1, H, W, D) per la CNN 3D classica.
+    # True  -> slice-come-canali (D, H, W) per la pipeline 2D (ibrida e
+    #          controllo classico appaiato), con resize in-plane a img_size.
+    channels_as_slices: bool = False
+    img_size: int = 64                       # lato in-plane in modalita' 2D
+    spatial_size: tuple[int, int, int] = (130, 130, 10)  # H, W, D (modalita' 3D)
+
+    # ── Augmentation FEDELE (vedi note mediche) ──
+    # Asse L-R anatomico nel tensore channel-first: per (D,H,W) e (1,H,W,D)
+    # la colonna (W) ha indice spaziale 1. DA VERIFICARE su ImageOrientationPatient.
+    lr_axis: int = 1
+    aug_translate_vox: float = 6.0           # traslazione rigida in-plane (voxel)
+    aug_rotate_deg: float = 6.0              # rotazione in-plane (gradi)
+    aug_flip_lr: bool = True                 # solo per task binario PD/controllo
+    aug_poisson: bool = True                 # rumore di conteggio realistico
+    aug_poisson_counts: tuple[float, float] = (1e3, 1e4)  # range conteggi equiv.
+    # NESSUNO scaling/zoom, NESSUNA deformazione elastica, NESSUN gamma/contrasto.
 
 
 @dataclass(frozen=True)
@@ -52,10 +69,39 @@ class ModelConfig:
 
 
 @dataclass(frozen=True)
+class QuantumConfig:
+    """Rete ibrida quanvoluzionale (late fusion), adattata dalla tesi.
+
+    Capacita' VOLUTAMENTE bassa: il vincitore EuroSAT (C16-Q64) e' tarato su
+    ~200 immagini; su ~46 pazienti partiamo dalla variante piu' leggera per
+    non ricadere nell'overfitting gia' diagnosticato nel notebook 2019.
+    """
+    # ── Circuito quanvoluzionale ──
+    num_qubits: int = 9                      # = kernel_size**2 (patch 3x3)
+    kernel_size: int = 3
+    stride: int = 1
+    measure_qubit: int = 0
+    # backend Qiskit 2.2 primitives V2: "statevector" | "aer"
+    ansatz: str = "rzrx"                     # "rzrx" (tesi) | "ry" (lean) | "rz" (frozen)
+    backend_type: str = "statevector"
+    n_parallel_chunks: int = 1               # PUB splitting (K); >1 con Aer
+
+    # ── Trunk classico (late fusion: Conv -> Conv -> Quanv -> testa) ──
+    in_channels: int = 10                    # 10 slice peri-striatali = canali
+    conv_channels: int = 6                   # variante leggera (C6-Q6)
+    conv_kernel_size: int = 5
+    conv_padding: int = 2
+    dropout_rate: float = 0.0
+    img_size: int = 64
+    num_classes: int = 2
+
+
+@dataclass(frozen=True)
 class Config:
     data: DataConfig = field(default_factory=DataConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
+    quantum: QuantumConfig = field(default_factory=QuantumConfig)
     output_dir: Path = Path("runs")
 
     def to_json(self, path: Path) -> None:

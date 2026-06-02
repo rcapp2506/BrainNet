@@ -1,4 +1,4 @@
-# Stack moderno per imaging medico 3D (giugno 2026)
+# Stack imaging medico 3D (giugno 2026)
 torch>=2.2
 monai>=1.4
 pydicom>=2.4
@@ -6,3 +6,8 @@ numpy>=1.26
 pandas>=2.2
 scikit-learn>=1.4
 matplotlib>=3.8
+
+# Rete ibrida quanvoluzionale (Qiskit 2.2, primitives V2)
+qiskit==2.2.*
+qiskit-aer>=0.15        # opzionale: backend "aer" piu' veloce dello statevector
+scipy>=1.11             # test di Wilcoxon per il confronto appaiato
