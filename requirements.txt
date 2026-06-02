@@ -1,0 +1,8 @@
+# Stack moderno per imaging medico 3D (giugno 2026)
+torch>=2.2
+monai>=1.4
+pydicom>=2.4
+numpy>=1.26
+pandas>=2.2
+scikit-learn>=1.4
+matplotlib>=3.8

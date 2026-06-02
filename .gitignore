@@ -1,0 +1,25 @@
+# === DATI E PHI: MAI NEL REPO ===
+data/
+*.dcm
+CDOPA/
+CDOPA-TEST/
+carbidopa*.csv
+labels.csv
+*.npy
+
+# Pesi e log
+runs/
+WEIGHTS/
+CDOPAWEIGHTS/
+LOGFOLDER/
+*.hdf5
+*.pt
+*.ckpt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+.DS_Store

@@ -1,0 +1,13 @@
+[project]
+name = "brainnet"
+version = "0.2.0"
+description = "CNN 3D per la diagnosi precoce di Parkinson da PET C-DOPA"
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
