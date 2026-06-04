@@ -89,17 +89,27 @@ class RandPoissonCounts:
 #  Costruzione delle pipeline di transform
 # ─────────────────────────────────────────────────────────────────────────────
 
+class _LoadLayout:
+    """Carica il volume e lo dispone nel layout richiesto.
+
+    Implementata come classe (non closure) per essere picklabile: su Windows i
+    worker del DataLoader avviano processi separati e devono serializzare la
+    trasformazione, e le funzioni annidate non sono picklabili.
+    """
+
+    def __init__(self, cfg: DataConfig):
+        self.cfg = cfg
+
+    def __call__(self, item):
+        v = load_volume(item["guid_dir"], self.cfg)
+        if self.cfg.channels_as_slices:
+            return np.transpose(v, (2, 0, 1)).astype(np.float32)   # (D,H,W)
+        return v[np.newaxis, ...].astype(np.float32)               # (1,H,W,D)
+
+
 def _to_layout(cfg: DataConfig):
     """Lambda di ingresso: legge il volume e lo dispone nel layout richiesto."""
-    if cfg.channels_as_slices:
-        def f(item):                                  # (H,W,D) -> (D,H,W)
-            v = load_volume(item["guid_dir"], cfg)
-            return np.transpose(v, (2, 0, 1)).astype(np.float32)
-    else:
-        def f(item):                                  # (H,W,D) -> (1,H,W,D)
-            v = load_volume(item["guid_dir"], cfg)
-            return v[np.newaxis, ...].astype(np.float32)
-    return f
+    return _LoadLayout(cfg)
 
 
 def _spatial_resize(cfg: DataConfig):

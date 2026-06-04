@@ -61,7 +61,7 @@ class TrainConfig:
     early_stop_patience: int = 20            # su AUC di validazione
     lr: float = 1e-3
     weight_decay: float = 1e-4
-    num_workers: int = 4
+    num_workers: int = 0      # 0 = nessun processo worker (sicuro su Windows); rialzabile ora che i transform sono picklabili
     amp: bool = True                         # mixed precision se CUDA disponibile
 
 

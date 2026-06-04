@@ -96,7 +96,7 @@ def train_cv(cfg: Config) -> list[dict]:
         opt = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr,
                                 weight_decay=cfg.train.weight_decay)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cfg.train.max_epochs)
-        scaler = torch.cuda.amp.GradScaler(enabled=cfg.train.amp and device.type == "cuda")
+        scaler = torch.amp.GradScaler("cuda", enabled=cfg.train.amp and device.type == "cuda")
 
         hist = {"train_loss": [], "val_loss": [], "val_auc": []}
         best_auc, best_state, patience = -1.0, None, 0
