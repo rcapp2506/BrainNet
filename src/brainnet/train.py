@@ -41,8 +41,10 @@ def _run_epoch(model, loader, device, optimizer=None, scaler=None, amp=False, de
     model.train(train)
     crit = nn.CrossEntropyLoss()
     losses, probs, labels = [], [], []
+    correct = total = 0
 
-    for batch in pbar(loader, desc=desc):
+    bar = pbar(loader, desc=desc)
+    for batch in bar:
         x = batch["image"].to(device, non_blocking=True)
         y = batch["label"].to(device, non_blocking=True)
         with torch.set_grad_enabled(train), torch.autocast(
@@ -58,6 +60,10 @@ def _run_epoch(model, loader, device, optimizer=None, scaler=None, amp=False, de
         losses.append(loss.item())
         probs.append(torch.softmax(logits.detach().float(), dim=1)[:, 1].cpu().numpy())
         labels.append(y.cpu().numpy())
+        correct += int((logits.detach().argmax(1) == y).sum().item())
+        total += int(y.numel())
+        if hasattr(bar, "set_postfix"):
+            bar.set_postfix(loss=f"{np.mean(losses):.3f}", acc=f"{correct/total:.3f}")
 
     return float(np.mean(losses)), np.concatenate(probs), np.concatenate(labels)
 

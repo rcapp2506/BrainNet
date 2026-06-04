@@ -63,8 +63,10 @@ def _run_epoch(model, loader, device, optimizer=None, desc=""):
     train = optimizer is not None
     model.train(train)
     crit = nn.CrossEntropyLoss()
-    probs, labels = [], []
-    for batch in pbar(loader, desc=desc):
+    probs, labels, losses = [], [], []
+    correct = total = 0
+    bar = pbar(loader, desc=desc)
+    for batch in bar:
         x = batch["image"].to(device)
         y = batch["label"].to(device)
         with torch.set_grad_enabled(train):
@@ -74,8 +76,13 @@ def _run_epoch(model, loader, device, optimizer=None, desc=""):
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
+        losses.append(loss.item())
         probs.append(torch.softmax(logits.detach(), dim=1)[:, 1].cpu().numpy())
         labels.append(y.cpu().numpy())
+        correct += int((logits.detach().argmax(1) == y).sum().item())
+        total += int(y.numel())
+        if hasattr(bar, "set_postfix"):
+            bar.set_postfix(loss=f"{np.mean(losses):.3f}", acc=f"{correct/total:.3f}")
     return np.concatenate(probs), np.concatenate(labels)
 
 
