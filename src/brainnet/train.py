@@ -10,6 +10,7 @@ Punti centrali della reingegnerizzazione:
 from __future__ import annotations
 
 import random
+import time
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,7 @@ from .data import build_dataframe, make_datasets
 from .model import build_model
 from .metrics import compute_metrics
 from .report import save_cv_report
+from .progress import pbar
 
 
 def set_seed(seed: int) -> None:
@@ -34,13 +36,13 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
 
 
-def _run_epoch(model, loader, device, optimizer=None, scaler=None, amp=False):
+def _run_epoch(model, loader, device, optimizer=None, scaler=None, amp=False, desc=""):
     train = optimizer is not None
     model.train(train)
     crit = nn.CrossEntropyLoss()
     losses, probs, labels = [], [], []
 
-    for batch in loader:
+    for batch in pbar(loader, desc=desc):
         x = batch["image"].to(device, non_blocking=True)
         y = batch["label"].to(device, non_blocking=True)
         with torch.set_grad_enabled(train), torch.autocast(
@@ -67,6 +69,14 @@ def train_cv(cfg: Config) -> list[dict]:
     cfg.to_json(cfg.output_dir / "config.json")
 
     df = build_dataframe(cfg.data)
+    n_pos = int((df["label"] == 1).sum())
+    print(f"Device: {device.type.upper()}"
+          f"{' (' + torch.cuda.get_device_name(0) + ')' if device.type == 'cuda' else ''}")
+    print(f"Pazienti: {len(df)} (positivi P={n_pos}, negativi={len(df) - n_pos}) | "
+          f"fold={cfg.train.n_folds} | max epoche/fold={cfg.train.max_epochs} "
+          f"| early-stop patience={cfg.train.early_stop_patience}")
+    print(f"Output in: {cfg.output_dir}/\n")
+
     skf = StratifiedGroupKFold(n_splits=cfg.train.n_folds, shuffle=True,
                                random_state=cfg.train.seed)
 
@@ -91,18 +101,27 @@ def train_cv(cfg: Config) -> list[dict]:
         hist = {"train_loss": [], "val_loss": [], "val_auc": []}
         best_auc, best_state, patience = -1.0, None, 0
         for epoch in range(cfg.train.max_epochs):
-            tl, _, _ = _run_epoch(model, dl_tr, device, optimizer=opt, scaler=scaler, amp=cfg.train.amp)
+            t0 = time.time()
+            tl, _, _ = _run_epoch(model, dl_tr, device, optimizer=opt, scaler=scaler,
+                                  amp=cfg.train.amp, desc=f"fold {fold} ep {epoch+1} train")
             sched.step()
-            vl, vp, vy = _run_epoch(model, dl_va, device, amp=cfg.train.amp)
+            vl, vp, vy = _run_epoch(model, dl_va, device, amp=cfg.train.amp,
+                                    desc=f"fold {fold} ep {epoch+1} val")
             m = compute_metrics(vy, vp, n_boot=0)
             hist["train_loss"].append(tl); hist["val_loss"].append(vl); hist["val_auc"].append(m.auc)
             if m.auc > best_auc:
                 best_auc, best_state, patience = m.auc, {
                     k: v.cpu().clone() for k, v in model.state_dict().items()}, 0
+                flag = " *best*"
             else:
                 patience += 1
-                if patience >= cfg.train.early_stop_patience:
-                    break
+                flag = f" (patience {patience}/{cfg.train.early_stop_patience})"
+            print(f"[fold {fold} | epoca {epoch+1}/{cfg.train.max_epochs}] "
+                  f"train_loss={tl:.3f} val_loss={vl:.3f} val_AUC={m.auc:.3f} "
+                  f"best={best_auc:.3f} ({time.time()-t0:.1f}s){flag}", flush=True)
+            if patience >= cfg.train.early_stop_patience:
+                print(f"[fold {fold}] early stopping all'epoca {epoch+1}", flush=True)
+                break
         histories.append(hist)
 
         if best_state is not None:

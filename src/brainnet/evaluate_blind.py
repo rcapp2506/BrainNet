@@ -30,6 +30,7 @@ import torch
 from .config import Config
 from .data import build_dataframe, make_eval_dataset
 from .metrics import compute_metrics
+from .progress import pbar
 
 
 def _test_config(cfg: Config, quantum: bool) -> Config:
@@ -58,7 +59,7 @@ def _build_model(cfg: Config, quantum: bool, seed: int = 42):
 def _predict(model, loader, device) -> tuple[np.ndarray, np.ndarray]:
     model.eval().to(device)
     probs, labels = [], []
-    for batch in loader:
+    for batch in pbar(loader, desc="test cieco"):
         x = batch["image"].to(device)
         logits = model(x)
         probs.append(torch.softmax(logits.float(), dim=1)[:, 1].cpu().numpy())

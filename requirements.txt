@@ -6,6 +6,7 @@ numpy>=1.26
 pandas>=2.2
 scikit-learn>=1.4
 matplotlib>=3.8
+tqdm>=4.66            # barre di avanzamento
 
 # Rete ibrida quanvoluzionale (Qiskit 2.2, primitives V2)
 qiskit==2.2.*
