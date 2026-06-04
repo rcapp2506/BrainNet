@@ -24,14 +24,18 @@ class ClassificationMetrics:
     fp: int
     fn: int
     tp: int
+    threshold: float = 0.5    # soglia usata per la matrice di confusione
 
 
 def compute_metrics(y_true: np.ndarray, y_prob: np.ndarray,
-                    n_boot: int = 2000, seed: int = 0) -> ClassificationMetrics:
-    """y_true: {0,1}; y_prob: probabilita' della classe positiva."""
+                    n_boot: int = 2000, seed: int = 0,
+                    threshold: float = 0.5) -> ClassificationMetrics:
+    """y_true: {0,1}; y_prob: probabilita' della classe positiva.
+    `threshold`: soglia di decisione (0.5 di default; usare youden_threshold
+    per il punto operativo ottimale)."""
     y_true = np.asarray(y_true).astype(int)
     y_prob = np.asarray(y_prob).astype(float)
-    y_pred = (y_prob >= 0.5).astype(int)
+    y_pred = (y_prob >= threshold).astype(int)
 
     # labels=[0,1] fissa l'ordine: convenzione sklearn riga=vero, colonna=predetto.
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
@@ -51,7 +55,19 @@ def compute_metrics(y_true: np.ndarray, y_prob: np.ndarray,
     return ClassificationMetrics(
         accuracy=acc, sensitivity=sens, specificity=spec, precision=prec,
         auc=auc, auc_ci95=(lo, hi), tn=int(tn), fp=int(fp), fn=int(fn), tp=int(tp),
+        threshold=float(threshold),
     )
+
+
+def youden_threshold(y_true, y_prob) -> float:
+    """Soglia ottimale per l'indice di Youden J = sensibilita' + specificita' - 1
+    (= TPR - FPR), massimizzato sulla curva ROC."""
+    from sklearn.metrics import roc_curve
+    y_true = np.asarray(y_true).astype(int)
+    y_prob = np.asarray(y_prob).astype(float)
+    fpr, tpr, thr = roc_curve(y_true, y_prob)
+    t = thr[int(np.argmax(tpr - fpr))]
+    return float(t) if np.isfinite(t) else 1.0
 
 
 def _bootstrap_auc_ci(y_true, y_prob, n_boot=2000, seed=0):
