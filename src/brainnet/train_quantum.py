@@ -123,7 +123,11 @@ def _train_one(model, dl_tr, dl_va, device, max_epochs, lr, weight_decay, patien
 def train_quantum_cv(cfg: Config, n_seeds: int = 5, max_epochs: int = 15,
                      batch_size: int = 4) -> dict:
     cfg = _make_config_2d(cfg)
+    if cfg.quantum.torch_threads:
+        torch.set_num_threads(cfg.quantum.torch_threads)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[quantum] backend={cfg.quantum.backend_type} aer_parallel={cfg.quantum.aer_parallel} "
+          f"chunks={cfg.quantum.n_parallel_chunks} torch_threads={cfg.quantum.torch_threads}")
     out_dir = cfg.output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -145,7 +149,8 @@ def train_quantum_cv(cfg: Config, n_seeds: int = 5, max_epochs: int = 15,
             seed = cfg.train.seed + 111 * s
             # Ibrido (quantistico): backend con seed -> init pesi riproducibile
             set_seed(seed)
-            bm = BackendManager(cfg.quantum.backend_type, seed=seed).initialize()
+            bm = BackendManager(cfg.quantum.backend_type, seed=seed,
+                                aer_parallel=cfg.quantum.aer_parallel).initialize()
             hybrid = HybridQuanvNet(cfg.quantum, bm)
             h = _train_one(hybrid, dl_tr, dl_va, device, max_epochs,
                            cfg.train.lr, cfg.train.weight_decay,

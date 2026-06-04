@@ -145,18 +145,33 @@ def build_transforms(cfg: DataConfig, train: bool) -> Compose:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_dataframe(cfg: DataConfig) -> pd.DataFrame:
-    """(guid_dir, label, group) dal CSV pseudonimizzato; verifica le cartelle."""
+    """(guid_dir, label, group) dal CSV pseudonimizzato; verifica le cartelle.
+
+    Segnala in modo ESPLICITO quanti pazienti del CSV hanno effettivamente la
+    cartella DICOM: i mancanti verrebbero altrimenti scartati in silenzio.
+    """
     df = pd.read_csv(cfg.data_root / cfg.labels_csv, dtype={cfg.guid_col: str})
     root = cfg.data_root / cfg.dicom_subdir
-    rows = []
+    rows, missing = [], []
     for _, r in df.iterrows():
         guid = str(r[cfg.guid_col])
         d = root / guid
         if not d.is_dir():
+            missing.append(guid)
             continue
         label = 1 if str(r[cfg.label_col]).strip().upper() == cfg.positive_label else 0
         rows.append({"guid_dir": d, "label": label, "group": guid})
     out = pd.DataFrame(rows)
+
+    total, found = len(df), len(out)
+    print(f"[dati] {root}: {found}/{total} pazienti con cartella DICOM"
+          + ("" if missing else " (completo)"))
+    if missing:
+        ex = ", ".join(missing[:5]) + (" ..." if len(missing) > 5 else "")
+        print(f"[ATTENZIONE] {len(missing)} GUID sono nel CSV ma NON hanno cartella in {root}.")
+        print(f"[ATTENZIONE] Il run userebbe solo {found} pazienti su {total}. "
+              f"Controlla la de-identificazione o il percorso 'dicom_subdir'.")
+        print(f"[ATTENZIONE] Esempi di mancanti: {ex}")
     if out.empty:
         raise RuntimeError(f"Nessun paziente trovato sotto {root}. Verifica CSV e dati.")
     return out

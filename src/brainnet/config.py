@@ -88,8 +88,13 @@ class QuantumConfig:
     measure_qubit: int = 0
     # backend Qiskit 2.2 primitives V2: "statevector" | "aer"
     ansatz: str = "rzrx"                     # "rzrx" (tesi) | "ry" (lean) | "rz" (frozen)
-    backend_type: str = "statevector"
-    n_parallel_chunks: int = 1               # PUB splitting (K); >1 con Aer
+    # ── Parallelismo CPU del simulatore (calibrato su 14 core fisici) ──
+    # Il forward quanvoluzionale gira su CPU (Qiskit). Con backend "aer" gli
+    # esperimenti (i circuiti delle patch) vengono eseguiti in parallelo.
+    backend_type: str = "aer"                # "aer" (parallelo, veloce) | "statevector" (esatto, per check)
+    aer_parallel: int = 12                   # thread/esperimenti Aer in parallelo (14 core - 2 di margine)
+    n_parallel_chunks: int = 8               # split dei PUB in K blocchi
+    torch_threads: int = 2                   # thread per la parte torch (evita oversubscription con Aer)
 
     # ── Trunk classico (late fusion: Conv -> Conv -> Quanv -> testa) ──
     in_channels: int = 10                    # 10 slice peri-striatali = canali
