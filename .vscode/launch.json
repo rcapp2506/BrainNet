@@ -1,0 +1,51 @@
+{
+  // Configurazioni di avvio per BrainNet.
+  // Selezionare prima l'interprete Python giusto (quello con torch/monai/qiskit):
+  //   Ctrl/Cmd+Shift+P -> "Python: Select Interpreter".
+  // I dati devono stare sotto <workspaceFolder>/data (CDOPA_DEID, CDOPA-TEST_DEID, *.csv).
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "BrainNet: train classico (3D CNN)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "brainnet.train",
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "BrainNet: train quantistico (ibrido vs classico)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "brainnet.train_quantum",
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "BrainNet: test cieco (classico)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "brainnet.evaluate_blind",
+      "args": ["--run-dir", "runs", "--mode", "classical"],
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "BrainNet: test cieco (quantistico)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "brainnet.evaluate_blind",
+      "args": ["--run-dir", "runs", "--mode", "quantum"],
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

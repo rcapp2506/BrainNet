@@ -22,6 +22,7 @@ from .config import Config
 from .data import build_dataframe, make_datasets
 from .model import build_model
 from .metrics import compute_metrics
+from .report import save_cv_report
 
 
 def set_seed(seed: int) -> None:
@@ -70,6 +71,8 @@ def train_cv(cfg: Config) -> list[dict]:
                                random_state=cfg.train.seed)
 
     fold_results = []
+    histories = []
+    oof_true, oof_prob = [], []
     for fold, (tr, va) in enumerate(skf.split(df, df["label"], groups=df["group"])):
         df_tr, df_va = df.iloc[tr], df.iloc[va]
         ds_tr, ds_va = make_datasets(df_tr, df_va, cfg)
@@ -85,12 +88,14 @@ def train_cv(cfg: Config) -> list[dict]:
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cfg.train.max_epochs)
         scaler = torch.cuda.amp.GradScaler(enabled=cfg.train.amp and device.type == "cuda")
 
+        hist = {"train_loss": [], "val_loss": [], "val_auc": []}
         best_auc, best_state, patience = -1.0, None, 0
         for epoch in range(cfg.train.max_epochs):
-            _run_epoch(model, dl_tr, device, optimizer=opt, scaler=scaler, amp=cfg.train.amp)
+            tl, _, _ = _run_epoch(model, dl_tr, device, optimizer=opt, scaler=scaler, amp=cfg.train.amp)
             sched.step()
-            _, vp, vy = _run_epoch(model, dl_va, device, amp=cfg.train.amp)
+            vl, vp, vy = _run_epoch(model, dl_va, device, amp=cfg.train.amp)
             m = compute_metrics(vy, vp, n_boot=0)
+            hist["train_loss"].append(tl); hist["val_loss"].append(vl); hist["val_auc"].append(m.auc)
             if m.auc > best_auc:
                 best_auc, best_state, patience = m.auc, {
                     k: v.cpu().clone() for k, v in model.state_dict().items()}, 0
@@ -98,6 +103,7 @@ def train_cv(cfg: Config) -> list[dict]:
                 patience += 1
                 if patience >= cfg.train.early_stop_patience:
                     break
+        histories.append(hist)
 
         if best_state is not None:
             model.load_state_dict(best_state)
@@ -105,6 +111,7 @@ def train_cv(cfg: Config) -> list[dict]:
 
         _, vp, vy = _run_epoch(model, dl_va, device, amp=cfg.train.amp)
         final = compute_metrics(vy, vp)
+        oof_true.extend(vy.tolist()); oof_prob.extend(vp.tolist())
         fold_results.append({"fold": fold, "metrics": final})
         print(f"[fold {fold}] AUC={final.auc:.3f} "
               f"CI95={final.auc_ci95[0]:.3f}-{final.auc_ci95[1]:.3f} "
@@ -112,6 +119,13 @@ def train_cv(cfg: Config) -> list[dict]:
 
     aucs = [r["metrics"].auc for r in fold_results]
     print(f"\nAUC media CV: {np.nanmean(aucs):.3f} +/- {np.nanstd(aucs):.3f}")
+
+    oof = save_cv_report(fold_results, histories, oof_true, oof_prob,
+                         cfg.output_dir, compute_metrics)
+    print(f"AUC out-of-fold: {oof.auc:.3f} "
+          f"(CI95 {oof.auc_ci95[0]:.3f}-{oof.auc_ci95[1]:.3f}) | "
+          f"sens={oof.sensitivity:.3f} spec={oof.specificity:.3f}")
+    print(f"Grafici e metriche salvati in: {cfg.output_dir}/")
     return fold_results
 
 
