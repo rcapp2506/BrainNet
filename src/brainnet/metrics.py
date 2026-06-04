@@ -70,6 +70,22 @@ def youden_threshold(y_true, y_prob) -> float:
     return float(t) if np.isfinite(t) else 1.0
 
 
+def threshold_for_sensitivity(y_true, y_prob, target_sensitivity: float = 0.95) -> float:
+    """Punto operativo clinico: la soglia piu' alta (massima specificita') che
+    garantisce comunque sensibilita' >= target. Serve a evitare i falsi negativi.
+    Se nessuna soglia raggiunge il target, ritorna 0.0 (predice tutto positivo)."""
+    from sklearn.metrics import roc_curve
+    y_true = np.asarray(y_true).astype(int)
+    y_prob = np.asarray(y_prob).astype(float)
+    fpr, tpr, thr = roc_curve(y_true, y_prob)
+    ok = np.where(tpr >= target_sensitivity)[0]
+    if ok.size == 0:
+        return 0.0
+    best = ok[int(np.argmin(fpr[ok]))]   # tra quelle che raggiungono il target, la piu' specifica
+    t = thr[best]
+    return float(t) if np.isfinite(t) else 1.0
+
+
 def _bootstrap_auc_ci(y_true, y_prob, n_boot=2000, seed=0):
     rng = np.random.default_rng(seed)
     n = len(y_true)

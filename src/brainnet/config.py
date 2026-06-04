@@ -60,7 +60,8 @@ class TrainConfig:
     batch_size: int = 16     # con GPU e volumi piccoli c'e' molto margine; rialzabile
     max_epochs: int = 150
     early_stop_patience: int = 20            # su AUC di validazione
-    class_weights: bool = True               # CrossEntropy pesata sulle frequenze (dataset sbilanciato)
+    class_weights: bool = False              # ricalibrazione pesi opzionale (default OFF: non aiutava l'AUC e destabilizzava i fold)
+    target_sensitivity: float = 0.95         # punto operativo clinico: max sensibilita' (evitare falsi negativi)
     lr: float = 1e-3
     weight_decay: float = 1e-4
     num_workers: int = 0      # 0 = nessun processo worker (sicuro su Windows); rialzabile ora che i transform sono picklabili
@@ -97,6 +98,9 @@ class QuantumConfig:
     aer_parallel: int = 12                   # thread/esperimenti Aer in parallelo (14 core - 2 di margine)
     n_parallel_chunks: int = 8               # split dei PUB in K blocchi
     torch_threads: int = 2                   # thread per la parte torch (evita oversubscription con Aer)
+    # ── Parallelismo sui job (fold, seed): porting dello schema della tesi ──
+    n_parallel_jobs: int = 1                 # 1 = seriale; su 14 core usare 6 (6 job x ~2 thread = 12)
+    omp_threads_per_job: int = 2             # thread BLAS/Aer per processo worker
 
     # ── Trunk classico (late fusion: Conv -> Conv -> Quanv -> testa) ──
     in_channels: int = 10                    # 10 slice peri-striatali = canali

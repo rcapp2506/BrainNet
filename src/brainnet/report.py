@@ -22,7 +22,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve
 
-from .metrics import youden_threshold
+from .metrics import youden_threshold, threshold_for_sensitivity
 
 _NEG, _POS = "Neg (N/T)", "Pos (P)"
 
@@ -93,26 +93,31 @@ def _operating_point(m):
     return fpr, tpr
 
 
-def save_cv_report(fold_results, histories, oof_true, oof_prob, out_dir, compute_metrics):
+def save_cv_report(fold_results, histories, oof_true, oof_prob, out_dir, compute_metrics,
+                   target_sensitivity: float = 0.95):
     """Genera figure e metrics.json. Ritorna le metriche OOF a soglia 0.5."""
     out_dir = Path(out_dir)
     yt, yp = np.asarray(oof_true), np.asarray(oof_prob)
 
     oof = compute_metrics(yt, yp)                                  # soglia 0.5
-    thr = youden_threshold(yt, yp)                                 # soglia ottimale
-    oof_opt = compute_metrics(yt, yp, threshold=thr)               # metriche al punto Youden
+    thr_y = youden_threshold(yt, yp)                               # bilanciata (Youden)
+    oof_y = compute_metrics(yt, yp, threshold=thr_y)
+    thr_c = threshold_for_sensitivity(yt, yp, target_sensitivity)  # clinica (max sensibilita')
+    oof_c = compute_metrics(yt, yp, threshold=thr_c)
 
     plot_confusion_matrix(oof.tn, oof.fp, oof.fn, oof.tp,
                           out_dir / "confusion_matrix.png",
                           title="Matrice di confusione (OOF, soglia 0.5)")
-    plot_confusion_matrix(oof_opt.tn, oof_opt.fp, oof_opt.fn, oof_opt.tp,
-                          out_dir / "confusion_matrix_youden.png",
-                          title=f"Matrice di confusione (OOF, soglia Youden={thr:.2f})")
+    plot_confusion_matrix(oof_c.tn, oof_c.fp, oof_c.fn, oof_c.tp,
+                          out_dir / "confusion_matrix_clinica.png",
+                          title=f"OOF, punto clinico (sens>={target_sensitivity:.2f}, soglia={thr_c:.2f})")
     plot_roc(yt, yp, oof.auc, oof.auc_ci95, out_dir / "roc_curve.png",
              points=[(f"soglia 0.5: sens={oof.sensitivity:.2f} spec={oof.specificity:.2f}",
                       _operating_point(oof), "tab:red"),
-                     (f"Youden {thr:.2f}: sens={oof_opt.sensitivity:.2f} spec={oof_opt.specificity:.2f}",
-                      _operating_point(oof_opt), "tab:green")])
+                     (f"Youden {thr_y:.2f}: sens={oof_y.sensitivity:.2f} spec={oof_y.specificity:.2f}",
+                      _operating_point(oof_y), "tab:orange"),
+                     (f"clinico {thr_c:.2f}: sens={oof_c.sensitivity:.2f} spec={oof_c.specificity:.2f}",
+                      _operating_point(oof_c), "tab:green")])
     if histories:
         plot_training_curves(histories, out_dir / "training_curves.png")
 
@@ -122,12 +127,16 @@ def save_cv_report(fold_results, histories, oof_true, oof_prob, out_dir, compute
         "cv_auc_mean": float(np.nanmean(aucs)),
         "cv_auc_std": float(np.nanstd(aucs)),
         "out_of_fold": asdict(oof),
-        "out_of_fold_youden": asdict(oof_opt),
-        "youden_threshold": thr,
+        "out_of_fold_youden": asdict(oof_y),
+        "out_of_fold_clinical": asdict(oof_c),
+        "youden_threshold": thr_y,
+        "clinical_threshold": thr_c,
+        "target_sensitivity": target_sensitivity,
     }
     (out_dir / "metrics.json").write_text(json.dumps(report, indent=2))
 
-    print(f"  Soglia ottimale (Youden) = {thr:.3f}")
-    print(f"  A 0.5:    sens={oof.sensitivity:.3f} spec={oof.specificity:.3f} acc={oof.accuracy:.3f}")
-    print(f"  A Youden: sens={oof_opt.sensitivity:.3f} spec={oof_opt.specificity:.3f} acc={oof_opt.accuracy:.3f}")
+    print(f"  Soglia Youden={thr_y:.3f} | Soglia clinica (sens>={target_sensitivity:.2f})={thr_c:.3f}")
+    print(f"  A 0.5:     sens={oof.sensitivity:.3f} spec={oof.specificity:.3f} acc={oof.accuracy:.3f}")
+    print(f"  A Youden:  sens={oof_y.sensitivity:.3f} spec={oof_y.specificity:.3f} acc={oof_y.accuracy:.3f}")
+    print(f"  Clinico:   sens={oof_c.sensitivity:.3f} spec={oof_c.specificity:.3f} acc={oof_c.accuracy:.3f}")
     return oof

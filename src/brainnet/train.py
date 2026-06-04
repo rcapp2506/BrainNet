@@ -154,7 +154,8 @@ def train_cv(cfg: Config) -> list[dict]:
     print(f"\nAUC media CV: {np.nanmean(aucs):.3f} +/- {np.nanstd(aucs):.3f}")
 
     oof = save_cv_report(fold_results, histories, oof_true, oof_prob,
-                         cfg.output_dir, compute_metrics)
+                         cfg.output_dir, compute_metrics,
+                         target_sensitivity=cfg.train.target_sensitivity)
     print(f"AUC out-of-fold: {oof.auc:.3f} "
           f"(CI95 {oof.auc_ci95[0]:.3f}-{oof.auc_ci95[1]:.3f}) | "
           f"sens={oof.sensitivity:.3f} spec={oof.specificity:.3f}")

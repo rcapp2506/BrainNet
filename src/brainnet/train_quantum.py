@@ -23,6 +23,12 @@ import random
 import time
 from pathlib import Path
 
+import os
+# Cap dei thread BLAS PRIMA di importare numpy/torch: con i job in parallelo
+# evita l'oversubscription (ogni processo userebbe altrimenti tutti i core).
+for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_v, "2")
+
 import numpy as np
 import torch
 from torch import nn
@@ -127,14 +133,58 @@ def _train_one(model, dl_tr, dl_va, device, max_epochs, lr, weight_decay, patien
     }
 
 
+def _run_job(payload):
+    """Allena la coppia (ibrido, classico) per un singolo (fold, seed).
+    Eseguibile in un processo worker: argomenti e ritorno sono picklabili."""
+    cfg, fold, seed, df_tr, df_va, max_epochs, batch_size, parallel = payload
+    if cfg.quantum.torch_threads:
+        torch.set_num_threads(cfg.quantum.torch_threads)
+    # In parallelo si usa la CPU: la GPU singola sarebbe contesa tra i processi,
+    # e il forward quanvoluzionale e' comunque su CPU (Qiskit).
+    device = torch.device("cpu") if parallel else torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu")
+
+    ds_tr, ds_va = make_datasets(df_tr, df_va, cfg)
+    dl_tr = DataLoader(ds_tr, batch_size=batch_size, shuffle=True, num_workers=0)
+    dl_va = DataLoader(ds_va, batch_size=batch_size, shuffle=False, num_workers=0)
+
+    weight = None
+    if cfg.train.class_weights:
+        w = class_weights_from_labels(df_tr["label"].values, cfg.quantum.num_classes)
+        weight = torch.tensor(w, dtype=torch.float32, device=device)
+    criterion = nn.CrossEntropyLoss(weight=weight)
+
+    # in parallelo Aer usa pochi thread per processo (budget = n_job x thread/job)
+    aer_par = cfg.quantum.omp_threads_per_job if parallel else cfg.quantum.aer_parallel
+
+    set_seed(seed)
+    bm = BackendManager(cfg.quantum.backend_type, seed=seed, aer_parallel=aer_par).initialize()
+    hybrid = HybridQuanvNet(cfg.quantum, bm)
+    h = _train_one(hybrid, dl_tr, dl_va, device, max_epochs, cfg.train.lr,
+                   cfg.train.weight_decay, cfg.train.early_stop_patience,
+                   tag=f"ibrido f{fold} s{seed}", criterion=criterion)
+    hybrid_state = {k: v.cpu() for k, v in hybrid.state_dict().items()}
+
+    set_seed(seed)
+    classical = MatchedClassicalNet(cfg.quantum)
+    c = _train_one(classical, dl_tr, dl_va, device, max_epochs, cfg.train.lr,
+                   cfg.train.weight_decay, cfg.train.early_stop_patience,
+                   tag=f"classico f{fold} s{seed}", criterion=criterion)
+
+    return {"fold": fold, "seed": seed, "hybrid": h, "classical": c,
+            "hybrid_state": hybrid_state, "hybrid_final_auc": h.get("final_auc")}
+
+
 def train_quantum_cv(cfg: Config, n_seeds: int = 5, max_epochs: int = 15,
                      batch_size: int = 4) -> dict:
     cfg = _make_config_2d(cfg)
     if cfg.quantum.torch_threads:
         torch.set_num_threads(cfg.quantum.torch_threads)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[quantum] backend={cfg.quantum.backend_type} aer_parallel={cfg.quantum.aer_parallel} "
-          f"chunks={cfg.quantum.n_parallel_chunks} torch_threads={cfg.quantum.torch_threads}")
+    n_jobs = max(1, cfg.quantum.n_parallel_jobs)
+    parallel = n_jobs > 1
+    print(f"[quantum] backend={cfg.quantum.backend_type} | job_paralleli={n_jobs} "
+          f"thread/job={cfg.quantum.omp_threads_per_job} "
+          f"(seriale: aer_parallel={cfg.quantum.aer_parallel}, chunks={cfg.quantum.n_parallel_chunks})")
     out_dir = cfg.output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -142,52 +192,45 @@ def train_quantum_cv(cfg: Config, n_seeds: int = 5, max_epochs: int = 15,
     skf = StratifiedGroupKFold(n_splits=cfg.train.n_folds, shuffle=True,
                                random_state=cfg.train.seed)
 
-    pairs = []  # un record per (fold, seed): metriche ibrido + classico appaiati
+    # griglia di job (fold, seed) — porting dello schema multi-seed della tesi
+    jobs = []
     for fold, (tr, va) in enumerate(skf.split(df, df["label"], groups=df["group"])):
         df_tr, df_va = df.iloc[tr], df.iloc[va]
-        ds_tr, ds_va = make_datasets(df_tr, df_va, cfg)
-        dl_tr = DataLoader(ds_tr, batch_size=batch_size, shuffle=True,
-                           num_workers=cfg.train.num_workers)
-        dl_va = DataLoader(ds_va, batch_size=batch_size, shuffle=False,
-                           num_workers=cfg.train.num_workers)
-
-        weight = None
-        if cfg.train.class_weights:
-            w = class_weights_from_labels(df_tr["label"].values, cfg.quantum.num_classes)
-            weight = torch.tensor(w, dtype=torch.float32, device=device)
-        criterion = nn.CrossEntropyLoss(weight=weight)
-        best_fold_auc = -1.0   # per salvare l'ibrido migliore del fold (test cieco)
         for s in range(n_seeds):
             seed = cfg.train.seed + 111 * s
-            # Ibrido (quantistico): backend con seed -> init pesi riproducibile
-            set_seed(seed)
-            bm = BackendManager(cfg.quantum.backend_type, seed=seed,
-                                aer_parallel=cfg.quantum.aer_parallel).initialize()
-            hybrid = HybridQuanvNet(cfg.quantum, bm)
-            h = _train_one(hybrid, dl_tr, dl_va, device, max_epochs,
-                           cfg.train.lr, cfg.train.weight_decay,
-                           cfg.train.early_stop_patience,
-                           tag=f"ibrido f{fold} s{seed}", criterion=criterion)
-            # checkpoint dell'ibrido migliore del fold -> ensemble per il test cieco
-            if h["final_auc"] is not None and h["final_auc"] > best_fold_auc:
-                best_fold_auc = h["final_auc"]
-                torch.save({k: v.cpu() for k, v in hybrid.state_dict().items()},
-                           out_dir / f"qfold{fold}_best.pt")
+            jobs.append((cfg, fold, seed, df_tr, df_va, max_epochs, batch_size, parallel))
 
-            # Controllo classico appaiato: stesso fold, stesso seed, stesso input
-            set_seed(seed)
-            classical = MatchedClassicalNet(cfg.quantum)
-            c = _train_one(classical, dl_tr, dl_va, device, max_epochs,
-                           cfg.train.lr, cfg.train.weight_decay,
-                           cfg.train.early_stop_patience,
-                           tag=f"classico f{fold} s{seed}", criterion=criterion)
+    results = []
+    if parallel:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        print(f"[quantum] avvio {len(jobs)} job su {n_jobs} processi...")
+        with ProcessPoolExecutor(max_workers=n_jobs) as ex:
+            futs = [ex.submit(_run_job, j) for j in jobs]
+            for fut in as_completed(futs):
+                results.append(fut.result())
+    else:
+        for j in jobs:
+            results.append(_run_job(j))
 
-            pairs.append({"fold": fold, "seed": seed, "hybrid": h, "classical": c})
-            print(f"[fold {fold} seed {seed}] "
-                  f"ibrido: acc1={h['epoch1_acc']:.3f} accF={h['final_acc']:.3f} "
-                  f"AUC={h['final_auc']:.3f} | "
-                  f"classico: acc1={c['epoch1_acc']:.3f} accF={c['final_acc']:.3f} "
-                  f"AUC={c['final_auc']:.3f}")
+    # checkpoint dell'ibrido migliore per fold (ensemble per il test cieco)
+    from collections import defaultdict
+    by_fold = defaultdict(list)
+    for r in results:
+        by_fold[r["fold"]].append(r)
+    for f, rs in by_fold.items():
+        valid = [r for r in rs if r["hybrid_final_auc"] is not None]
+        if valid:
+            best = max(valid, key=lambda r: r["hybrid_final_auc"])
+            torch.save(best["hybrid_state"], out_dir / f"qfold{f}_best.pt")
+
+    pairs = [{"fold": r["fold"], "seed": r["seed"],
+              "hybrid": r["hybrid"], "classical": r["classical"]} for r in results]
+    pairs.sort(key=lambda p: (p["fold"], p["seed"]))
+    for p in pairs:
+        h, c = p["hybrid"], p["classical"]
+        print(f"[fold {p['fold']} seed {p['seed']}] "
+              f"ibrido: acc1={h['epoch1_acc']:.3f} accF={h['final_acc']:.3f} AUC={h['final_auc']:.3f} | "
+              f"classico: acc1={c['epoch1_acc']:.3f} accF={c['final_acc']:.3f} AUC={c['final_auc']:.3f}")
 
     summary = _summarize(pairs)
     (out_dir / "quantum_results.json").write_text(
@@ -242,4 +285,18 @@ def _print_summary(s: dict) -> None:
 
 
 if __name__ == "__main__":
-    train_quantum_cv(Config())
+    import argparse
+    ap = argparse.ArgumentParser(description="Training quantistico ibrido vs classico (CV multi-seed).")
+    ap.add_argument("--jobs", type=int, default=None,
+                    help="processi paralleli sui job (fold,seed); override di n_parallel_jobs. Su 14 core: 6")
+    ap.add_argument("--serial", action="store_true", help="forza esecuzione seriale (= --jobs 1)")
+    ap.add_argument("--seeds", type=int, default=5, help="numero di seed per fold")
+    ap.add_argument("--epochs", type=int, default=15, help="epoche massime per modello")
+    ap.add_argument("--batch-size", type=int, default=4)
+    args = ap.parse_args()
+
+    cfg = Config()
+    n_jobs = 1 if args.serial else args.jobs
+    if n_jobs is not None:
+        cfg = dataclasses.replace(cfg, quantum=dataclasses.replace(cfg.quantum, n_parallel_jobs=n_jobs))
+    train_quantum_cv(cfg, n_seeds=args.seeds, max_epochs=args.epochs, batch_size=args.batch_size)

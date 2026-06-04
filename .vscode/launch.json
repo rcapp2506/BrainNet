@@ -26,6 +26,17 @@
       "justMyCode": false
     },
     {
+      "name": "BrainNet: train quantistico (parallelo 6 job)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "brainnet.train_quantum",
+      "args": ["--jobs", "6"],
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       "name": "BrainNet: test cieco (classico)",
       "type": "debugpy",
       "request": "launch",
