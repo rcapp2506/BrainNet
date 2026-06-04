@@ -1,10 +1,13 @@
 """Definizione dei modelli 3D.
 
 Due opzioni:
-  * "densenet": MONAI DenseNet121 a 3 dimensioni. E' la rete che oggi userei come
-    default per volumi PET/CT: profonda ma regolarizzata, robusta su dataset piccoli.
-  * "smallcnn": l'equivalente svecchiato della rete del notebook (4 blocchi conv),
-    riscritta in PyTorch con BatchNorm e GELU, utile come baseline leggera.
+  * "smallcnn" (DEFAULT): erede modernizzato della CNN del paper 2021 (blocchi
+    Conv3D + BatchNorm + GELU + pooling), con AdaptiveAvgPool finale. Adatta a
+    volumi anisotropi a poche slice (qui 130x130x10) e a pochi pazienti.
+  * "densenet": MONAI DenseNet121 3D. ATTENZIONE: esegue ~5 dimezzamenti, quindi
+    l'asse delle slice (10) collassa sotto il kernel di pooling -> errore. Usabile
+    solo ridimensionando il volume a una profondita' molto maggiore (interpolando
+    slice, sconsigliato) e comunque sovradimensionata per ~98 pazienti.
 """
 from __future__ import annotations
 
@@ -26,7 +29,7 @@ class SmallCNN3D(nn.Module):
                 nn.Conv3d(ci, co, kernel_size=3, padding=1, bias=False),
                 nn.BatchNorm3d(co),
                 nn.GELU(),
-                nn.MaxPool3d(2),
+                nn.MaxPool3d(2, ceil_mode=True),   # ceil: l'asse slice (10) non collassa a 0
                 nn.Dropout3d(dropout),
             )
 

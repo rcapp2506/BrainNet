@@ -68,7 +68,7 @@ class TrainConfig:
 @dataclass(frozen=True)
 class ModelConfig:
     # "densenet" (MONAI DenseNet121 3D, raccomandato) oppure "smallcnn"
-    arch: str = "densenet"
+    arch: str = "smallcnn"   # smallcnn: adatta a 130x130x10 e a pochi pazienti (vedi model.py)
     dropout: float = 0.2
     n_classes: int = 2
 
