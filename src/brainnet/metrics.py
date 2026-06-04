@@ -66,3 +66,15 @@ def _bootstrap_auc_ci(y_true, y_prob, n_boot=2000, seed=0):
     if not aucs:
         return (float("nan"), float("nan"))
     return (float(np.percentile(aucs, 2.5)), float(np.percentile(aucs, 97.5)))
+
+
+def class_weights_from_labels(labels, n_classes: int = 2):
+    """Pesi inversamente proporzionali alla frequenza di classe (per la loss).
+
+    w[c] = N / (n_classes * count[c]); classi assenti -> peso neutro.
+    Calcolare SEMPRE solo sul training (per-fold), mai su validation/test.
+    """
+    import numpy as np
+    counts = np.bincount(np.asarray(labels, dtype=int), minlength=n_classes).astype(float)
+    counts[counts == 0] = 1.0
+    return counts.sum() / (n_classes * counts)

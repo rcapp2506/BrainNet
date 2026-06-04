@@ -22,7 +22,7 @@ from sklearn.model_selection import StratifiedGroupKFold
 from .config import Config
 from .data import build_dataframe, make_datasets
 from .model import build_model
-from .metrics import compute_metrics
+from .metrics import compute_metrics, class_weights_from_labels
 from .report import save_cv_report
 from .progress import pbar
 
@@ -36,10 +36,10 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
 
 
-def _run_epoch(model, loader, device, optimizer=None, scaler=None, amp=False, desc=""):
+def _run_epoch(model, loader, device, optimizer=None, scaler=None, amp=False, desc="", criterion=None):
     train = optimizer is not None
     model.train(train)
-    crit = nn.CrossEntropyLoss()
+    crit = criterion if criterion is not None else nn.CrossEntropyLoss()
     losses, probs, labels = [], [], []
     correct = total = 0
 
@@ -104,15 +104,23 @@ def train_cv(cfg: Config) -> list[dict]:
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cfg.train.max_epochs)
         scaler = torch.amp.GradScaler("cuda", enabled=cfg.train.amp and device.type == "cuda")
 
+        weight = None
+        if cfg.train.class_weights:
+            w = class_weights_from_labels(df_tr["label"].values, cfg.model.n_classes)
+            weight = torch.tensor(w, dtype=torch.float32, device=device)
+            print(f"[fold {fold}] pesi di classe (neg, pos): {np.round(w, 3)}")
+        criterion = nn.CrossEntropyLoss(weight=weight)
+
         hist = {"train_loss": [], "val_loss": [], "val_auc": []}
         best_auc, best_state, patience = -1.0, None, 0
         for epoch in range(cfg.train.max_epochs):
             t0 = time.time()
             tl, _, _ = _run_epoch(model, dl_tr, device, optimizer=opt, scaler=scaler,
-                                  amp=cfg.train.amp, desc=f"fold {fold} ep {epoch+1} train")
+                                  amp=cfg.train.amp, desc=f"fold {fold} ep {epoch+1} train",
+                                  criterion=criterion)
             sched.step()
             vl, vp, vy = _run_epoch(model, dl_va, device, amp=cfg.train.amp,
-                                    desc=f"fold {fold} ep {epoch+1} val")
+                                    desc=f"fold {fold} ep {epoch+1} val", criterion=criterion)
             m = compute_metrics(vy, vp, n_boot=0)
             hist["train_loss"].append(tl); hist["val_loss"].append(vl); hist["val_auc"].append(m.auc)
             if m.auc > best_auc:

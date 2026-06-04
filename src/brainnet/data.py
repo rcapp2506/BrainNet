@@ -166,6 +166,9 @@ def build_dataframe(cfg: DataConfig) -> pd.DataFrame:
     total, found = len(df), len(out)
     print(f"[dati] {root}: {found}/{total} pazienti con cartella DICOM"
           + ("" if missing else " (completo)"))
+    if found:
+        n_pos = int((out["label"] == 1).sum())
+        print(f"[dati] bilanciamento classi: positivi(P)={n_pos}, negativi(N/T)={found - n_pos}")
     if missing:
         ex = ", ".join(missing[:5]) + (" ..." if len(missing) > 5 else "")
         print(f"[ATTENZIONE] {len(missing)} GUID sono nel CSV ma NON hanno cartella in {root}.")

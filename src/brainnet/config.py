@@ -56,9 +56,10 @@ class DataConfig:
 class TrainConfig:
     n_folds: int = 5
     seed: int = 42
-    batch_size: int = 4
+    batch_size: int = 16     # con GPU e volumi piccoli c'e' molto margine; rialzabile
     max_epochs: int = 150
     early_stop_patience: int = 20            # su AUC di validazione
+    class_weights: bool = True               # CrossEntropy pesata sulle frequenze (dataset sbilanciato)
     lr: float = 1e-3
     weight_decay: float = 1e-4
     num_workers: int = 0      # 0 = nessun processo worker (sicuro su Windows); rialzabile ora che i transform sono picklabili

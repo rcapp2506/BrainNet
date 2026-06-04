@@ -32,7 +32,7 @@ from scipy.stats import wilcoxon
 
 from .config import Config
 from .data import build_dataframe, make_datasets
-from .metrics import compute_metrics
+from .metrics import compute_metrics, class_weights_from_labels
 from .quantum.engine import BackendManager
 from .quantum.hybrid import HybridQuanvNet, MatchedClassicalNet
 from .progress import pbar
@@ -59,10 +59,10 @@ def _make_config_2d(cfg: Config) -> Config:
     return dataclasses.replace(cfg, data=data2d)
 
 
-def _run_epoch(model, loader, device, optimizer=None, desc=""):
+def _run_epoch(model, loader, device, optimizer=None, desc="", criterion=None):
     train = optimizer is not None
     model.train(train)
-    crit = nn.CrossEntropyLoss()
+    crit = criterion if criterion is not None else nn.CrossEntropyLoss()
     probs, labels, losses = [], [], []
     correct = total = 0
     bar = pbar(loader, desc=desc)
@@ -86,7 +86,7 @@ def _run_epoch(model, loader, device, optimizer=None, desc=""):
     return np.concatenate(probs), np.concatenate(labels)
 
 
-def _train_one(model, dl_tr, dl_va, device, max_epochs, lr, weight_decay, patience, tag=""):
+def _train_one(model, dl_tr, dl_va, device, max_epochs, lr, weight_decay, patience, tag="", criterion=None):
     """Allena un modello; ritorna le metriche per-epoca e quelle finali."""
     model.to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -96,9 +96,9 @@ def _train_one(model, dl_tr, dl_va, device, max_epochs, lr, weight_decay, patien
     best_auc, best_state, since_best = -1.0, None, 0
     for ep in range(max_epochs):
         t0 = time.time()
-        _run_epoch(model, dl_tr, device, optimizer=opt, desc=f"{tag} ep{ep+1} train")
+        _run_epoch(model, dl_tr, device, optimizer=opt, desc=f"{tag} ep{ep+1} train", criterion=criterion)
         sched.step()
-        vp, vy = _run_epoch(model, dl_va, device, desc=f"{tag} ep{ep+1} val")
+        vp, vy = _run_epoch(model, dl_va, device, desc=f"{tag} ep{ep+1} val", criterion=criterion)
         m = compute_metrics(vy, vp, n_boot=0)
         epoch_acc.append(m.accuracy)
         epoch_auc.append(m.auc)
@@ -151,6 +151,11 @@ def train_quantum_cv(cfg: Config, n_seeds: int = 5, max_epochs: int = 15,
         dl_va = DataLoader(ds_va, batch_size=batch_size, shuffle=False,
                            num_workers=cfg.train.num_workers)
 
+        weight = None
+        if cfg.train.class_weights:
+            w = class_weights_from_labels(df_tr["label"].values, cfg.quantum.num_classes)
+            weight = torch.tensor(w, dtype=torch.float32, device=device)
+        criterion = nn.CrossEntropyLoss(weight=weight)
         best_fold_auc = -1.0   # per salvare l'ibrido migliore del fold (test cieco)
         for s in range(n_seeds):
             seed = cfg.train.seed + 111 * s
@@ -162,7 +167,7 @@ def train_quantum_cv(cfg: Config, n_seeds: int = 5, max_epochs: int = 15,
             h = _train_one(hybrid, dl_tr, dl_va, device, max_epochs,
                            cfg.train.lr, cfg.train.weight_decay,
                            cfg.train.early_stop_patience,
-                           tag=f"ibrido f{fold} s{seed}")
+                           tag=f"ibrido f{fold} s{seed}", criterion=criterion)
             # checkpoint dell'ibrido migliore del fold -> ensemble per il test cieco
             if h["final_auc"] is not None and h["final_auc"] > best_fold_auc:
                 best_fold_auc = h["final_auc"]
@@ -175,7 +180,7 @@ def train_quantum_cv(cfg: Config, n_seeds: int = 5, max_epochs: int = 15,
             c = _train_one(classical, dl_tr, dl_va, device, max_epochs,
                            cfg.train.lr, cfg.train.weight_decay,
                            cfg.train.early_stop_patience,
-                           tag=f"classico f{fold} s{seed}")
+                           tag=f"classico f{fold} s{seed}", criterion=criterion)
 
             pairs.append({"fold": fold, "seed": seed, "hybrid": h, "classical": c})
             print(f"[fold {fold} seed {seed}] "
