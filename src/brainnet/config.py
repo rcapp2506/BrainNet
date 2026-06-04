@@ -36,6 +36,7 @@ class DataConfig:
     # False -> volume 3D (1, H, W, D) per la CNN 3D classica.
     # True  -> slice-come-canali (D, H, W) per la pipeline 2D (ibrida e
     #          controllo classico appaiato), con resize in-plane a img_size.
+    cache_volumes: bool = True               # tieni i volumi in RAM (letti una volta sola)
     channels_as_slices: bool = False
     img_size: int = 64                       # lato in-plane in modalita' 2D
     spatial_size: tuple[int, int, int] = (130, 130, 10)  # H, W, D (modalita' 3D)

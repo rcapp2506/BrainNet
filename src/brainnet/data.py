@@ -37,9 +37,23 @@ from .config import Config, DataConfig
 #  Lettura DICOM
 # ─────────────────────────────────────────────────────────────────────────────
 
+_VOLUME_CACHE: dict = {}   # cache in RAM dei volumi ritagliati (letti una volta sola)
+
+
 def load_volume(guid_dir, cfg: DataConfig) -> np.ndarray:
     """Legge le slice DICOM di un paziente, le ordina per posizione assiale,
-    ritaglia la ROI peri-striatale e impila il sotto-volume. Ritorna (H, W, D)."""
+    ritaglia la ROI peri-striatale e impila il sotto-volume. Ritorna (H, W, D).
+
+    I volumi ritagliati sono piccoli (~0,7 MB), quindi vengono tenuti in cache
+    in RAM: letti dal disco solo alla prima epoca, poi riusati. L'augmentation
+    resta applicata a valle, fresca a ogni epoca. Disattivabile con
+    cfg.cache_volumes=False.
+    """
+    use_cache = getattr(cfg, "cache_volumes", True)
+    key = (str(guid_dir), cfg.slice_start, cfg.slice_end, cfg.crop_x, cfg.crop_y)
+    if use_cache and key in _VOLUME_CACHE:
+        return _VOLUME_CACHE[key]
+
     slices = [pydicom.dcmread(str(p)) for p in sorted(guid_dir.glob("*.dcm"))]
 
     def _z(s):
@@ -53,7 +67,10 @@ def load_volume(guid_dir, cfg: DataConfig) -> np.ndarray:
     x0, x1 = cfg.crop_x
     y0, y1 = cfg.crop_y
     sub = volume[cfg.slice_start:cfg.slice_end, x0:x1, y0:y1]               # (D,H,W)
-    return np.transpose(sub, (1, 2, 0))                                     # (H,W,D)
+    out = np.transpose(sub, (1, 2, 0)).copy()                              # (H,W,D)
+    if use_cache:
+        _VOLUME_CACHE[key] = out
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────────
