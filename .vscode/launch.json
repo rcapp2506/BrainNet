@@ -16,6 +16,17 @@
       "justMyCode": false
     },
     {
+      "name": "BrainNet: campagna multi-seed (10)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "brainnet.multiseed",
+      "args": ["--seeds", "10"],
+      "cwd": "${workspaceFolder}",
+      "env": { "PYTHONPATH": "${workspaceFolder}/src" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
       "name": "BrainNet: train quantistico (ibrido vs classico)",
       "type": "debugpy",
       "request": "launch",

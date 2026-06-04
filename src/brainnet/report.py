@@ -20,7 +20,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_curve, roc_auc_score
 
 from .metrics import youden_threshold, threshold_for_sensitivity
 
@@ -140,3 +140,97 @@ def save_cv_report(fold_results, histories, oof_true, oof_prob, out_dir, compute
     print(f"  A Youden:  sens={oof_y.sensitivity:.3f} spec={oof_y.specificity:.3f} acc={oof_y.accuracy:.3f}")
     print(f"  Clinico:   sens={oof_c.sensitivity:.3f} spec={oof_c.specificity:.3f} acc={oof_c.accuracy:.3f}")
     return oof
+
+
+# ─────────────────────── analisi multi-seed (varianza + fasce) ───────────────────────
+
+def plot_roc_band(oof_list, path):
+    """oof_list: lista di (y_true, y_prob), una per seed. Banda media ± std della ROC."""
+    grid = np.linspace(0, 1, 101)
+    tprs, aucs = [], []
+    for yt, yp in oof_list:
+        fpr, tpr, _ = roc_curve(yt, yp)
+        ti = np.interp(grid, fpr, tpr); ti[0] = 0.0
+        tprs.append(ti); aucs.append(roc_auc_score(yt, yp))
+    tprs = np.array(tprs)
+    mean_tpr, std_tpr = tprs.mean(0), tprs.std(0)
+    mean_tpr[-1] = 1.0
+    fig, ax = plt.subplots(figsize=(5.0, 4.6))
+    ax.plot(grid, mean_tpr, color="tab:blue", lw=2,
+            label=f"ROC media (AUC {np.mean(aucs):.3f} ± {np.std(aucs):.3f})")
+    ax.fill_between(grid, np.clip(mean_tpr - std_tpr, 0, 1), np.clip(mean_tpr + std_tpr, 0, 1),
+                    color="tab:blue", alpha=0.2, label="± 1 dev. std")
+    ax.plot([0, 1], [0, 1], "--", color="gray", lw=1)
+    ax.set_xlim(-0.02, 1.02); ax.set_ylim(-0.02, 1.02)
+    ax.set_xlabel("1 - Specificita' (FPR)"); ax.set_ylabel("Sensibilita' (TPR)")
+    ax.set_title(f"ROC media su {len(oof_list)} seed (out-of-fold)")
+    ax.legend(loc="lower right", fontsize=8)
+    fig.tight_layout(); fig.savefig(path, dpi=150); plt.close(fig)
+
+
+def plot_auc_distribution(aucs, path):
+    aucs = np.asarray(aucs, float)
+    fig, ax = plt.subplots(figsize=(4.0, 4.4))
+    ax.boxplot(aucs, vert=True, widths=0.5, showmeans=True)
+    ax.scatter(np.random.default_rng(0).normal(1, 0.04, len(aucs)), aucs,
+               color="tab:blue", alpha=0.6, zorder=3)
+    ax.set_xticks([1], ["OOF AUC"])
+    ax.set_ylabel("AUC")
+    ax.set_title(f"Distribuzione AUC su {len(aucs)} seed\n"
+                 f"media={aucs.mean():.3f} ± {aucs.std():.3f}")
+    fig.tight_layout(); fig.savefig(path, dpi=150); plt.close(fig)
+
+
+def plot_metric_bands(metric_dict, path):
+    """metric_dict: {nome: [valori per seed]} -> barre media ± dev. std."""
+    names = list(metric_dict)
+    means = [float(np.mean(metric_dict[n])) for n in names]
+    stds = [float(np.std(metric_dict[n])) for n in names]
+    fig, ax = plt.subplots(figsize=(1.5 * len(names) + 1.5, 4.0))
+    x = np.arange(len(names))
+    ax.bar(x, means, yerr=stds, capsize=5, color="tab:blue", alpha=0.75)
+    for xi, m, s in zip(x, means, stds):
+        ax.text(xi, min(m + s + 0.03, 1.04), f"{m:.2f}±{s:.2f}", ha="center", fontsize=8)
+    ax.set_xticks(x, names, rotation=15)
+    ax.set_ylim(0, 1.08); ax.set_ylabel("valore")
+    ax.set_title("Metriche OOF: media ± dev. std sui seed")
+    fig.tight_layout(); fig.savefig(path, dpi=150); plt.close(fig)
+
+
+def save_multiseed_report(per_seed, out_dir, compute_metrics, youden_threshold,
+                          target_sensitivity: float = 0.95):
+    """per_seed: lista di {seed, oof_true, oof_prob}. Salva varianza e grafici a fasce."""
+    out_dir = Path(out_dir)
+    oof_list = [(np.asarray(s["oof_true"]), np.asarray(s["oof_prob"])) for s in per_seed]
+
+    rows = []
+    for s, (yt, yp) in zip(per_seed, oof_list):
+        m05 = compute_metrics(yt, yp)
+        thr_y = youden_threshold(yt, yp)
+        my = compute_metrics(yt, yp, threshold=thr_y)
+        rows.append({"seed": s["seed"], "auc": m05.auc,
+                     "sens_05": m05.sensitivity, "spec_05": m05.specificity,
+                     "youden_threshold": thr_y,
+                     "sens_youden": my.sensitivity, "spec_youden": my.specificity})
+
+    def stats(key):
+        v = np.array([r[key] for r in rows], float)
+        return {"mean": float(np.mean(v)), "std": float(np.std(v)),
+                "min": float(np.min(v)), "max": float(np.max(v)),
+                "ci95": [float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))]}
+
+    summary = {k: stats(k) for k in
+               ("auc", "sens_05", "spec_05", "sens_youden", "spec_youden")}
+
+    plot_roc_band(oof_list, out_dir / "roc_band.png")
+    plot_auc_distribution([r["auc"] for r in rows], out_dir / "auc_distribution.png")
+    plot_metric_bands({"AUC": [r["auc"] for r in rows],
+                       "sens@0.5": [r["sens_05"] for r in rows],
+                       "spec@0.5": [r["spec_05"] for r in rows],
+                       "sens@You": [r["sens_youden"] for r in rows],
+                       "spec@You": [r["spec_youden"] for r in rows]},
+                      out_dir / "metrics_band.png")
+
+    (out_dir / "multiseed_metrics.json").write_text(
+        json.dumps({"n_seeds": len(rows), "per_seed": rows, "summary": summary}, indent=2))
+    return summary
