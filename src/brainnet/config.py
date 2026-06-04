@@ -14,7 +14,7 @@ import json
 class DataConfig:
     # Layout su disco: <root>/CDOPA/<GUID>/IM-0001-XXXX.dcm
     data_root: Path = Path("data")
-    dicom_subdir: str = "CDOPA"
+    dicom_subdir: str = "CDOPA_DEID"        # cartella DICOM de-identificata (training)
     labels_csv: str = "labels.csv"           # CSV PSEUDONIMIZZATO (solo GUID, LABEL)
     guid_col: str = "GUID"
     label_col: str = "LABEL"
@@ -23,7 +23,7 @@ class DataConfig:
     # ── Test cieco (golden set indipendente: carbidopa-test.csv) ──
     # Coorte separata, valutata UNA SOLA VOLTA a fine lavoro.
     test_labels_csv: str = "labels_test.csv"
-    test_dicom_subdir: str = "CDOPA-TEST"
+    test_dicom_subdir: str = "CDOPA-TEST_DEID"  # cartella DICOM de-identificata (test cieco)
 
     # Region of interest peri-striatale (esplicita e documentata; nel notebook
     # originale erano xmin/xmax/ymin/ymax + irange* sovrascritti a runtime).
